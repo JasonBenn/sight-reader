@@ -1,0 +1,35 @@
+.staff-container {
+  position: relative;
+}
+
+.note {
+  border-radius: 20px;
+  width: 20px;
+  height: 20px;
+  border: 8px solid black;
+
+  position: absolute;
+  left: 330px;
+}
+
+.progress, .current-notes {
+  height: 1em;
+  font-size: 3em;
+  text-align: center;
+}
+
+._4g { top: 2.3%; }
+._4f { top: 5.9%; }
+._4e { top: 9.3%; }
+._4d { top: 12.5%; }
+._4c { top: 16%; }
+._4b { top: 19.5%; }
+._4a { top: 23.1%; }
+
+._3g { top: 26.6%; }
+._3f { top: 30%; }
+._3e { top: 33.4%; }
+._3d { top: 36.8%; }
+._3c { top: 40.2%; }
+._3b { top: 43.6%; }
+._3a { top: 47.2%; }
