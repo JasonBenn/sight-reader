@@ -13,7 +13,7 @@ const EQUIVALENTS = {
 
 let notesHistory = []
 let cursor = -1
-let notesToPractice = 100
+let notesToPractice = 50
 let notesLeft = notesToPractice
 let errors = 0
 let startTime
@@ -31,7 +31,6 @@ const previousNotes = () => {
 }
 
 const nextNotes = (toPractice, { mode }) => {
-  console.log(toPractice)
   let notes
   if (mode === 'sequence') {
     notes = toPractice.shift()
@@ -40,7 +39,6 @@ const nextNotes = (toPractice, { mode }) => {
   }
   notesHistory.push(notes)
   cursor += 1
-  console.log(notes)
   display(notesHistory[cursor])
 }
 
@@ -143,7 +141,6 @@ const WHITE_KEY_NOTE_OFFSETS = {
   b: 6
 }
 const getNoteCodeTop = (noteCode, hand) => {
-  console.log(noteCode)
   const [ match, note, accidental, octave ] = /([a-g])([b#])?(\d)/.exec(noteCode)
   const steps = ((octave - 4) * 7) + WHITE_KEY_NOTE_OFFSETS[note]
   const pxFromMiddleC = steps * -STEP
@@ -163,7 +160,7 @@ const getNoteCodeTop = (noteCode, hand) => {
 const appendNote = (hand, noteCode) => {
   // const midiKeyCode = noteCodeToMidiKeyCode(noteCode)
   const top = getNoteCodeTop(noteCode, hand)
-  $('.staff-container').append(`<div style="top: ${top}px" class="note" id="${noteCode}">${noteCode}</div>`)
+  $('.staff-container').append(`<div style="top: ${top}px" class="note" id="${noteCode}"></div>`)
 }
 
 const appendLeftHandNote = _.partial(appendNote, 'l')
@@ -182,6 +179,9 @@ const stringifyNotes = ({ r, l }) => {
 
 const reportError = () => {
   errors += 1
+  const notesPlayed = notesToPractice - notesLeft
+  const score = 100.0 * (notesPlayed - errors) / notesPlayed
+  $('.progress').text('Score: ' + score + '%. Time: ' + timeToPlay.toFixed(1) + ' seconds')
 }
 
 const updateProgress = () => {
@@ -197,33 +197,54 @@ const updateProgress = () => {
   }
 }
 
-const onMidiMessage = msg => {
+let currentCorrectNotes = 0
+let currentIncorrectNotes = 0
+
+const onMidiMessage = (correctCallback, incorrectCallback, msg) => {
   const [eventType, midiKeyCode, velocity] = msg.data
   const currentNotes = _.flatten(_.values(notesHistory[cursor]))
   const noteCode = midiKeyCodeToNoteCode(midiKeyCode)
 
   if (_.contains(currentNotes, noteCode)) {
     if (velocity) {
+      currentCorrectNotes += 1
       $('#' + noteCode).css({ borderColor: 'green' })
     } else {
+      currentCorrectNotes = Math.max(currentCorrectNotes - 1, 0)
       $('#' + noteCode).css({ borderColor: 'black' })
     }
   } else {
     if (velocity) {
       // determine hand by looking at current notes. which hand is it closer to? if only one, choose that one.
-      appendNote('r', noteCode)
+      appendNote(determineHandAttempt(noteCode), noteCode)
+      currentIncorrectNotes += 1
       $('#' + noteCode).css({ borderColor: 'red' })
     } else {
+      currentIncorrectNotes = Math.max(currentIncorrectNotes - 1, 0)
       $('#' + noteCode).remove()
     }
   }
+
+  if (currentCorrectNotes === currentNotes.length && !currentIncorrectNotes) {
+    currentCorrectNotes = 0
+    currentIncorrectNotes = 0
+    correctCallback()
+  } else if (currentIncorrectNotes) {
+    console.log(currentNotes, currentCorrectNotes, currentIncorrectNotes)
+    incorrectCallback()
+  }
 }
 
-const onMIDISuccess = midiAccess => {
-  var inputs = midiAccess.inputs.values()
-  for (var input = inputs.next(); input && !input.done; input = inputs.next()) {
-    input.value.onmidimessage = onMidiMessage
-  }
+const determineHandAttempt = noteCode => {
+  const badNote = noteCodeToMidiKeyCode(noteCode)
+  const currentNotes = notesHistory[cursor]
+  if (!currentNotes.l) return 'r'
+  if (!currentNotes.r) return 'l'
+
+  const highestLeftHandNote = Math.max(...currentNotes.l.map(noteCodeToMidiKeyCode))
+  const lowestRightHandNote = Math.min(...currentNotes.r.map(noteCodeToMidiKeyCode))
+  const closerToLeft = Math.abs(badNote - highestLeftHandNote) < Math.abs(badNote - lowestRightHandNote)
+  return closerToLeft ? 'l' : 'r'
 }
 
 const start = (toPractice, options) => {
@@ -237,14 +258,9 @@ const start = (toPractice, options) => {
         break
       }
       case KEYS.F: {
-        updateProgress()
-        customizedNextNotes()
         break
       }
       case KEYS.B: {
-        reportError()
-        updateProgress()
-        customizedNextNotes()
         break
       }
       case KEYS.SPACE: {
@@ -252,6 +268,22 @@ const start = (toPractice, options) => {
         playNotes()
         break
       }
+    }
+  }
+
+  const success = () => {
+    updateProgress()
+    customizedNextNotes()
+  }
+
+  const error = () => {
+    console.log('error')
+  }
+
+  const onMIDISuccess = midiAccess => {
+    var inputs = midiAccess.inputs.values()
+    for (var input = inputs.next(); input && !input.done; input = inputs.next()) {
+      input.value.onmidimessage = _.partial(onMidiMessage, success, error)
     }
   }
 
@@ -268,67 +300,67 @@ const start = (toPractice, options) => {
 const claireDeLune = [
   // Staff 3
   { l: ['f3', 'a3'], r: ['b3', 'e4'] },
-  // { r: ['d4'] },
-  // { r: ['e4'] },
-  // { r: ['d4'] },
-  // { l: ['e3', 'g3'], r: ['a3', 'c4'] },
-  // { l: ['a2'] },
-  // { l: ['d2', 'a2'] },
-  // { r: ['a3', 'f3'] },
-  // { l: ['a2', 'c3'] },
-  // { r: ['f5', 'a5'] },
-  // { r: ['d5', 'f5'] },
-  // { l: ['g2', 'd3'] },
-  // { l: ['d3', 'g3', 'b3', 'd4'], r: ['g4', 'b4', 'e5'] },
+  { r: ['d4'] },
+  { r: ['e4'] },
+  { r: ['d4'] },
+  { l: ['e3', 'g3'], r: ['a3', 'c4'] },
+  { l: ['a2'] },
+  { l: ['d2', 'a2'] },
+  { r: ['a3', 'f3'] },
+  { l: ['a2', 'c3'] },
+  { r: ['f5', 'a5'] },
+  { r: ['d5', 'f5'] },
+  { l: ['g2', 'd3'] },
+  { l: ['d3', 'g3', 'b3', 'd4'], r: ['g4', 'b4', 'e5'] },
+  { r: ['f5'] },
+  { r: ['e5'] },
+  { l: ['g2', 'd3'] },
+  // { r: ['a4'] },
+  { l: ['f3', 'a3'], r: ['d4', 'd5'] },
+  { r: ['d4', 'd5'] },
+  { l: ['d4', 'f4'], r: ['a4', 'd5', 'a5'] },
+  { l: ['a3', 'd4'], r: ['f4', 'd5', 'g5'] },
+  // Staff 4
+  { l: ['g2', 'd3'], r: ['f5'] },
+  { l: ['d3', 'g3', 'b3', 'd4'], r: ['g4', 'b4', 'e5'] },
+  { r: ['f5'] },
+  { r: ['e5'] },
+  { r: ['d5'] },
+  // { r: ['a4'] },
+  { l: ['f3', 'cb4'], r: ['d4', 'd5'] },
+  { r: ['e4', 'e5'] },
   // { r: ['f5'] },
-  // { r: ['e5'] },
-  // { l: ['g2', 'd3'] },
-  // // { r: ['a4'] },
-  // { l: ['f3', 'a3'], r: ['d4', 'd5'] },
-  // { r: ['d4', 'd5'] },
-  // { l: ['d4', 'f4'], r: ['a4', 'd5', 'a5'] },
-  // { l: ['a3', 'd4'], r: ['f4', 'd5', 'g5'] },
-  // // Staff 4
-  // { l: ['g2', 'd3'], r: ['f5'] },
-  // { l: ['d3', 'g3', 'b3', 'd4'], r: ['g4', 'b4', 'e5'] },
-  // { r: ['f5'] },
-  // { r: ['e5'] },
-  // { r: ['d5'] },
-  // // { r: ['a4'] },
-  // { l: ['f3', '4bc'], r: ['d4', 'd5'] },
-  // { r: ['e4', 'e5'] },
-  // // { r: ['f5'] },
-  // { l: ['cb4', 'd4', 'f4'], r: ['b4', 'b5'] },
-  // { r: ['f4', 'f5'] },
-  // { r: ['f4', 'f5'] },
-  // { l: ['b2'] },
-  // { l: ['f3', 'b3', 'e4'], r: ['f4', 'b4', 'e5'] },
-  // { r: ['f5'] },
-  // { r: ['e5'] },
-  // { l: ['d4'], r: ['d5'] },
-  // { r: ['b4'] },
-  // // Staff 5 (epic)
-  // { l: ['e1', 'e2'] },
+  { l: ['cb4', 'd4', 'f4'], r: ['b4', 'b5'] },
+  { r: ['f4', 'f5'] },
+  { r: ['f4', 'f5'] },
+  { l: ['b2'] },
+  { l: ['f3', 'b3', 'e4'], r: ['f4', 'b4', 'e5'] },
+  { r: ['f5'] },
+  { r: ['e5'] },
+  { l: ['d4'], r: ['d5'] },
+  { r: ['b4'] },
+  // Staff 5 (epic)
+  { l: ['e1', 'e2'] },
 
-  // { l: ['f4', 'g4', 'b4'], r: ['f5', 'b5', 'f6'] },
+  { l: ['f4', 'g4', 'b4'], r: ['f5', 'b5', 'f6'] },
 
-  // { l: ['e4', 'g4', 'b4'], r: ['e5', 'b5', 'e6'] },
-  // { l: ['e4', 'g4', 'b4'], r: ['e5', 'b5', 'e6'] },
-  // { l: ['e4', 'g4', 'b4'], r: ['e5', 'b5', 'e6'] },
+  { l: ['e4', 'g4', 'b4'], r: ['e5', 'b5', 'e6'] },
+  { l: ['e4', 'g4', 'b4'], r: ['e5', 'b5', 'e6'] },
+  { l: ['e4', 'g4', 'b4'], r: ['e5', 'b5', 'e6'] },
 
-  // { l: ['d4', 'g4', 'b4'], r: ['d5', 'b5', 'd6'] },
-  // { l: ['d4', 'g4', 'b4'], r: ['d5', 'b5', 'd6'] },
-  // { l: ['d4', 'g4', 'b4'], r: ['d5', 'b5', 'd6'] },
+  { l: ['d4', 'g4', 'b4'], r: ['d5', 'b5', 'd6'] },
+  { l: ['d4', 'g4', 'b4'], r: ['d5', 'b5', 'd6'] },
+  { l: ['d4', 'g4', 'b4'], r: ['d5', 'b5', 'd6'] },
 
-  // { l: ['c3', 'g4', 'b4'], r: ['c5', 'g5', 'b5', 'c6'] },
-  // { l: ['c3', 'g4', 'b4'], r: ['c5', 'g5', 'b5', 'c6'] },
-  // { l: ['c3', 'g4', 'b4'], r: ['c5', 'g5', 'b5', 'c6'] },
+  { l: ['c3', 'g4', 'b4'], r: ['c5', 'g5', 'b5', 'c6'] },
+  { l: ['c3', 'g4', 'b4'], r: ['c5', 'g5', 'b5', 'c6'] },
+  { l: ['c3', 'g4', 'b4'], r: ['c5', 'g5', 'b5', 'c6'] },
 
-  // { l: ['d4', 'g4', 'b4'], r: ['d5', 'b5', 'd6'] },
+  { l: ['d4', 'g4', 'b4'], r: ['d5', 'b5', 'd6'] },
 
-  // { l: ['b3', 'd4', 'g4'], r: ['b4', 'g5', 'b5'] },
+  { l: ['b3', 'd4', 'g4'], r: ['b4', 'g5', 'b5'] },
 
-  // { l: ['e1', 'e2', 'b2'] }
+  { l: ['e2', 'b2'] }
 ]
 
 const translateNote = (key, noteCode) => {
@@ -356,9 +388,7 @@ const dbM = {
 
 // console.table(translateNoteSetToKey(dbM, claireDeLune))
 
-$(() => {
-  start(translateNoteSetToKey(dbM, claireDeLune), { mode: 'sequence' })
-})
+$(() => start(translateNoteSetToKey(dbM, claireDeLune), { mode: 'sequence' }))
 
 // if (require.main === module) {
 //   const test = require('tape')

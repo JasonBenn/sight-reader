@@ -2,6 +2,8 @@
 
 var _slicedToArray = (function () { function sliceIterator(arr, i) { var _arr = []; var _n = true; var _d = false; var _e = undefined; try { for (var _i = arr[Symbol.iterator](), _s; !(_n = (_s = _i.next()).done); _n = true) { _arr.push(_s.value); if (i && _arr.length === i) break; } } catch (err) { _d = true; _e = err; } finally { try { if (!_n && _i["return"]) _i["return"](); } finally { if (_d) throw _e; } } return _arr; } return function (arr, i) { if (Array.isArray(arr)) { return arr; } else if (Symbol.iterator in Object(arr)) { return sliceIterator(arr, i); } else { throw new TypeError("Invalid attempt to destructure non-iterable instance"); } }; })();
 
+function _toConsumableArray(arr) { if (Array.isArray(arr)) { for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) { arr2[i] = arr[i]; } return arr2; } else { return Array.from(arr); } }
+
 // import _ from 'lodash'
 // import $ from 'jquery'
 
@@ -17,7 +19,7 @@ var EQUIVALENTS = {
 
 var notesHistory = [];
 var cursor = -1;
-var notesToPractice = 100;
+var notesToPractice = 50;
 var notesLeft = notesToPractice;
 var errors = 0;
 var startTime = undefined;
@@ -37,7 +39,6 @@ var previousNotes = function previousNotes() {
 var nextNotes = function nextNotes(toPractice, _ref) {
   var mode = _ref.mode;
 
-  console.log(toPractice);
   var notes = undefined;
   if (mode === 'sequence') {
     notes = toPractice.shift();
@@ -46,7 +47,6 @@ var nextNotes = function nextNotes(toPractice, _ref) {
   }
   notesHistory.push(notes);
   cursor += 1;
-  console.log(notes);
   display(notesHistory[cursor]);
 };
 
@@ -157,8 +157,6 @@ var WHITE_KEY_NOTE_OFFSETS = {
   b: 6
 };
 var getNoteCodeTop = function getNoteCodeTop(noteCode, hand) {
-  console.log(noteCode);
-
   var _$exec3 = /([a-g])([b#])?(\d)/.exec(noteCode);
 
   var _$exec4 = _slicedToArray(_$exec3, 4);
@@ -188,7 +186,7 @@ var getNoteCodeTop = function getNoteCodeTop(noteCode, hand) {
 var appendNote = function appendNote(hand, noteCode) {
   // const midiKeyCode = noteCodeToMidiKeyCode(noteCode)
   var top = getNoteCodeTop(noteCode, hand);
-  $('.staff-container').append('<div style="top: ' + top + 'px" class="note" id="' + noteCode + '">' + noteCode + '</div>');
+  $('.staff-container').append('<div style="top: ' + top + 'px" class="note" id="' + noteCode + '"></div>');
 };
 
 var appendLeftHandNote = _.partial(appendNote, 'l');
@@ -211,6 +209,9 @@ var stringifyNotes = function stringifyNotes(_ref2) {
 
 var reportError = function reportError() {
   errors += 1;
+  var notesPlayed = notesToPractice - notesLeft;
+  var score = 100.0 * (notesPlayed - errors) / notesPlayed;
+  $('.progress').text('Score: ' + score + '%. Time: ' + timeToPlay.toFixed(1) + ' seconds');
 };
 
 var updateProgress = function updateProgress() {
@@ -218,15 +219,18 @@ var updateProgress = function updateProgress() {
   var notesPlayed = notesToPractice - notesLeft;
   var score = 100.0 * (notesPlayed - errors) / notesPlayed;
   if (notesLeft === 0) {
-    var timeToPlay = (Date.now() - startTime) / 1000.0;
-    $('.progress').text('Score: ' + score + '%. Time: ' + timeToPlay.toFixed(1) + ' seconds');
+    var _timeToPlay = (Date.now() - startTime) / 1000.0;
+    $('.progress').text('Score: ' + score + '%. Time: ' + _timeToPlay.toFixed(1) + ' seconds');
     document.onkeyup = null;
   } else {
     $('.progress').text(notesLeft + ' left! Score: ' + score.toFixed(1) + '%');
   }
 };
 
-var onMidiMessage = function onMidiMessage(msg) {
+var currentCorrectNotes = 0;
+var currentIncorrectNotes = 0;
+
+var onMidiMessage = function onMidiMessage(correctCallback, incorrectCallback, msg) {
   var _msg$data = _slicedToArray(msg.data, 3);
 
   var eventType = _msg$data[0];
@@ -238,26 +242,46 @@ var onMidiMessage = function onMidiMessage(msg) {
 
   if (_.contains(currentNotes, noteCode)) {
     if (velocity) {
+      currentCorrectNotes += 1;
       $('#' + noteCode).css({ borderColor: 'green' });
     } else {
+      currentCorrectNotes = Math.max(currentCorrectNotes - 1, 0);
       $('#' + noteCode).css({ borderColor: 'black' });
     }
   } else {
     if (velocity) {
       // determine hand by looking at current notes. which hand is it closer to? if only one, choose that one.
-      appendNote('r', noteCode);
+      appendNote(determineHandAttempt(noteCode), noteCode);
+      currentIncorrectNotes += 1;
       $('#' + noteCode).css({ borderColor: 'red' });
     } else {
+      currentIncorrectNotes = Math.max(currentIncorrectNotes - 1, 0);
       $('#' + noteCode).remove();
     }
   }
+
+  if (currentCorrectNotes === currentNotes.length && !currentIncorrectNotes) {
+    currentCorrectNotes = 0;
+    currentIncorrectNotes = 0;
+    correctCallback();
+  } else if (currentIncorrectNotes) {
+    console.log(currentNotes, currentCorrectNotes, currentIncorrectNotes);
+    incorrectCallback();
+  }
 };
 
-var onMIDISuccess = function onMIDISuccess(midiAccess) {
-  var inputs = midiAccess.inputs.values();
-  for (var input = inputs.next(); input && !input.done; input = inputs.next()) {
-    input.value.onmidimessage = onMidiMessage;
-  }
+var determineHandAttempt = function determineHandAttempt(noteCode) {
+  var _Math, _Math2;
+
+  var badNote = noteCodeToMidiKeyCode(noteCode);
+  var currentNotes = notesHistory[cursor];
+  if (!currentNotes.l) return 'r';
+  if (!currentNotes.r) return 'l';
+
+  var highestLeftHandNote = (_Math = Math).max.apply(_Math, _toConsumableArray(currentNotes.l.map(noteCodeToMidiKeyCode)));
+  var lowestRightHandNote = (_Math2 = Math).min.apply(_Math2, _toConsumableArray(currentNotes.r.map(noteCodeToMidiKeyCode)));
+  var closerToLeft = Math.abs(badNote - highestLeftHandNote) < Math.abs(badNote - lowestRightHandNote);
+  return closerToLeft ? 'l' : 'r';
 };
 
 var start = function start(toPractice, options) {
@@ -273,15 +297,10 @@ var start = function start(toPractice, options) {
         }
       case KEYS.F:
         {
-          updateProgress();
-          customizedNextNotes();
           break;
         }
       case KEYS.B:
         {
-          reportError();
-          updateProgress();
-          customizedNextNotes();
           break;
         }
       case KEYS.SPACE:
@@ -290,6 +309,22 @@ var start = function start(toPractice, options) {
           playNotes();
           break;
         }
+    }
+  };
+
+  var success = function success() {
+    updateProgress();
+    customizedNextNotes();
+  };
+
+  var error = function error() {
+    console.log('error');
+  };
+
+  var onMIDISuccess = function onMIDISuccess(midiAccess) {
+    var inputs = midiAccess.inputs.values();
+    for (var input = inputs.next(); input && !input.done; input = inputs.next()) {
+      input.value.onmidimessage = _.partial(onMidiMessage, success, error);
     }
   };
 
@@ -305,69 +340,18 @@ var start = function start(toPractice, options) {
 
 var claireDeLune = [
 // Staff 3
-{ l: ['f3', 'a3'], r: ['b3', 'e4'] }];
-
-// { r: ['d4'] },
-// { r: ['e4'] },
-// { r: ['d4'] },
-// { l: ['e3', 'g3'], r: ['a3', 'c4'] },
-// { l: ['a2'] },
-// { l: ['d2', 'a2'] },
-// { r: ['a3', 'f3'] },
-// { l: ['a2', 'c3'] },
-// { r: ['f5', 'a5'] },
-// { r: ['d5', 'f5'] },
-// { l: ['g2', 'd3'] },
-// { l: ['d3', 'g3', 'b3', 'd4'], r: ['g4', 'b4', 'e5'] },
+{ l: ['f3', 'a3'], r: ['b3', 'e4'] }, { r: ['d4'] }, { r: ['e4'] }, { r: ['d4'] }, { l: ['e3', 'g3'], r: ['a3', 'c4'] }, { l: ['a2'] }, { l: ['d2', 'a2'] }, { r: ['a3', 'f3'] }, { l: ['a2', 'c3'] }, { r: ['f5', 'a5'] }, { r: ['d5', 'f5'] }, { l: ['g2', 'd3'] }, { l: ['d3', 'g3', 'b3', 'd4'], r: ['g4', 'b4', 'e5'] }, { r: ['f5'] }, { r: ['e5'] }, { l: ['g2', 'd3'] },
+// { r: ['a4'] },
+{ l: ['f3', 'a3'], r: ['d4', 'd5'] }, { r: ['d4', 'd5'] }, { l: ['d4', 'f4'], r: ['a4', 'd5', 'a5'] }, { l: ['a3', 'd4'], r: ['f4', 'd5', 'g5'] },
+// Staff 4
+{ l: ['g2', 'd3'], r: ['f5'] }, { l: ['d3', 'g3', 'b3', 'd4'], r: ['g4', 'b4', 'e5'] }, { r: ['f5'] }, { r: ['e5'] }, { r: ['d5'] },
+// { r: ['a4'] },
+{ l: ['f3', 'cb4'], r: ['d4', 'd5'] }, { r: ['e4', 'e5'] },
 // { r: ['f5'] },
-// { r: ['e5'] },
-// { l: ['g2', 'd3'] },
-// // { r: ['a4'] },
-// { l: ['f3', 'a3'], r: ['d4', 'd5'] },
-// { r: ['d4', 'd5'] },
-// { l: ['d4', 'f4'], r: ['a4', 'd5', 'a5'] },
-// { l: ['a3', 'd4'], r: ['f4', 'd5', 'g5'] },
-// // Staff 4
-// { l: ['g2', 'd3'], r: ['f5'] },
-// { l: ['d3', 'g3', 'b3', 'd4'], r: ['g4', 'b4', 'e5'] },
-// { r: ['f5'] },
-// { r: ['e5'] },
-// { r: ['d5'] },
-// // { r: ['a4'] },
-// { l: ['f3', '4bc'], r: ['d4', 'd5'] },
-// { r: ['e4', 'e5'] },
-// // { r: ['f5'] },
-// { l: ['cb4', 'd4', 'f4'], r: ['b4', 'b5'] },
-// { r: ['f4', 'f5'] },
-// { r: ['f4', 'f5'] },
-// { l: ['b2'] },
-// { l: ['f3', 'b3', 'e4'], r: ['f4', 'b4', 'e5'] },
-// { r: ['f5'] },
-// { r: ['e5'] },
-// { l: ['d4'], r: ['d5'] },
-// { r: ['b4'] },
-// // Staff 5 (epic)
-// { l: ['e1', 'e2'] },
+{ l: ['cb4', 'd4', 'f4'], r: ['b4', 'b5'] }, { r: ['f4', 'f5'] }, { r: ['f4', 'f5'] }, { l: ['b2'] }, { l: ['f3', 'b3', 'e4'], r: ['f4', 'b4', 'e5'] }, { r: ['f5'] }, { r: ['e5'] }, { l: ['d4'], r: ['d5'] }, { r: ['b4'] },
+// Staff 5 (epic)
+{ l: ['e1', 'e2'] }, { l: ['f4', 'g4', 'b4'], r: ['f5', 'b5', 'f6'] }, { l: ['e4', 'g4', 'b4'], r: ['e5', 'b5', 'e6'] }, { l: ['e4', 'g4', 'b4'], r: ['e5', 'b5', 'e6'] }, { l: ['e4', 'g4', 'b4'], r: ['e5', 'b5', 'e6'] }, { l: ['d4', 'g4', 'b4'], r: ['d5', 'b5', 'd6'] }, { l: ['d4', 'g4', 'b4'], r: ['d5', 'b5', 'd6'] }, { l: ['d4', 'g4', 'b4'], r: ['d5', 'b5', 'd6'] }, { l: ['c3', 'g4', 'b4'], r: ['c5', 'g5', 'b5', 'c6'] }, { l: ['c3', 'g4', 'b4'], r: ['c5', 'g5', 'b5', 'c6'] }, { l: ['c3', 'g4', 'b4'], r: ['c5', 'g5', 'b5', 'c6'] }, { l: ['d4', 'g4', 'b4'], r: ['d5', 'b5', 'd6'] }, { l: ['b3', 'd4', 'g4'], r: ['b4', 'g5', 'b5'] }, { l: ['e2', 'b2'] }];
 
-// { l: ['f4', 'g4', 'b4'], r: ['f5', 'b5', 'f6'] },
-
-// { l: ['e4', 'g4', 'b4'], r: ['e5', 'b5', 'e6'] },
-// { l: ['e4', 'g4', 'b4'], r: ['e5', 'b5', 'e6'] },
-// { l: ['e4', 'g4', 'b4'], r: ['e5', 'b5', 'e6'] },
-
-// { l: ['d4', 'g4', 'b4'], r: ['d5', 'b5', 'd6'] },
-// { l: ['d4', 'g4', 'b4'], r: ['d5', 'b5', 'd6'] },
-// { l: ['d4', 'g4', 'b4'], r: ['d5', 'b5', 'd6'] },
-
-// { l: ['c3', 'g4', 'b4'], r: ['c5', 'g5', 'b5', 'c6'] },
-// { l: ['c3', 'g4', 'b4'], r: ['c5', 'g5', 'b5', 'c6'] },
-// { l: ['c3', 'g4', 'b4'], r: ['c5', 'g5', 'b5', 'c6'] },
-
-// { l: ['d4', 'g4', 'b4'], r: ['d5', 'b5', 'd6'] },
-
-// { l: ['b3', 'd4', 'g4'], r: ['b4', 'g5', 'b5'] },
-
-// { l: ['e1', 'e2', 'b2'] }
 var translateNote = function translateNote(key, noteCode) {
   // DOESN'T HANDLE ACCIDENTALS
 
@@ -405,7 +389,7 @@ var dbM = {
 // console.table(translateNoteSetToKey(dbM, claireDeLune))
 
 $(function () {
-  start(translateNoteSetToKey(dbM, claireDeLune), { mode: 'sequence' });
+  return start(translateNoteSetToKey(dbM, claireDeLune), { mode: 'sequence' });
 });
 
 // if (require.main === module) {
